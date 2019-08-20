@@ -49,7 +49,9 @@ def run_module():
         version=dict(type='str', required=False),
         source=dict(type='dict', required=True),
         namespace=dict(type='str', required=False, default='default'),
-        state=dict(type='str', required=False, default='present')
+        context=dict(type='str', required=False, default=''),
+        state=dict(type='str', required=False, default='present'),
+        values=dict(type='str', required=False, default='')
     )
 
     # seed the result dict in the object
@@ -81,12 +83,45 @@ def run_module():
     chart_namespace = module.params['namespace']
     chart_state = module.params['state']
     chart_name = module.params['name']
-    chart_version = parse_version(module.params['version'])
     chart_location = module.params['source']['location']
+    chart_source_type = module.params['source']['type'] # Only remote repos
+    kube_context = module.params['context']
+    values = module.params['values']
+
+    if values != '':
+        values = ' --set ' + values
+    
+    # If version is not provided, we use a 0 to avoid crash
+    if module.params['version'] != None:
+        chart_version = parse_version(module.params['version'])
+    else:
+        chart_version = 0
+
+    if chart_source_type == 'repo':
+        chart_source_name = module.params['source']['name'] # Only used for remote repos
+
+        # Add the repo
+        cmd_str = "helm tiller run kube-system -- helm repo add %s %s" % (chart_source_name, chart_location)
+        (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
+        if rc:
+            return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
+        
+        # Update repo
+        cmd_str = "helm tiller run kube-system -- helm repo update"
+        (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
+        if rc:
+            return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
+
+    if kube_context != '':
+        cmd_str = "kubectl config use-context %s" % kube_context
+        (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
+        if rc:
+            return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
+
     # (rc, out, err) = module.run_command("pwd && ls", use_unsafe_shell=True)
     # return module.fail_json(msg=module.jsonify([rc, out, err]))
     if chart_state == 'absent':
-        cmd_str = "helm delete '%s'" % chart_name
+        cmd_str = "helm tiller run kube-system -- helm delete '%s'" % chart_name
         (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -97,12 +132,16 @@ def run_module():
 
     req_file = os.path.join(chart_location, 'requirements.yaml')
     if os.path.isfile(req_file):
-        cmd_str = "helm dependency update %s" % chart_location
+        cmd_str = "helm tiller run kube-system -- helm dependency update %s" % chart_location
         (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
 
-    cmd_str = "helm ls --all | grep '%s' | cut -f 4,5 | xargs" % chart_name
+    # For remote repos location consists in chart repo name + chart name
+    if chart_source_type == 'repo':
+        chart_location = chart_source_name + "/" + chart_name
+        
+    cmd_str = "helm tiller run kube-system -- helm ls --all | grep '%s' | cut -f 4,5 | xargs" % chart_name
     (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
     if rc:
         return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -111,7 +150,7 @@ def run_module():
     out = out.splitlines()[-1:]
 
     if len(out) == 0 or not out[-1].strip():  # chart doesn't exist first time, install
-        cmd_str = "helm install --namespace='%s' --name='%s' %s --version %s" % (chart_namespace, chart_name, chart_location, chart_version)
+        cmd_str = "helm tiller run kube-system -- helm install --namespace='%s' --name='%s' %s --version %s %s" % (chart_namespace, chart_name, chart_location, chart_version, values)
         (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -120,7 +159,7 @@ def run_module():
         result['original_message'] = out
         return module.exit_json(**result)
     elif out[-1].split()[0].lower() == 'deleted':
-        cmd_str = "helm install --namespace='%s' --name='%s' --replace %s" % (chart_namespace, chart_name, chart_location)
+        cmd_str = "helm tiller run kube-system -- helm install --namespace='%s' --name='%s' --replace %s %s" % (chart_namespace, chart_name, chart_location, values)
         (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -135,7 +174,7 @@ def run_module():
         if deployment_status.lower() != "deployed" or chart_version > deployed_version:
             module.debug("Upgrading %s, deployed: %s, deploying: %s, current status: %s" % (
                 chart_name, deployed_version, chart_version, deployment_status))
-            cmd_str = "helm upgrade %s %s" % (chart_name, chart_location)
+            cmd_str = "helm tiller run kube-system -- helm upgrade %s %s %s" % (chart_name, chart_location, values)
             (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
             if rc:
                 return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -144,7 +183,7 @@ def run_module():
             result['original_message'] = out
             return module.exit_json(**result)
         elif chart_version < deployed_version:
-            cmd_str = "helm history %s | grep '%s' | cut -f 1" % (chart_name, chart_version)
+            cmd_str = "helm tiller run kube-system -- helm history %s | grep '%s' | cut -f 1" % (chart_name, chart_version)
             (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
             if rc:
                 return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -156,7 +195,7 @@ def run_module():
             # Multiple revisions can have the same version
             # each one will be on their own line so take the newest i.e. the lat one
             deployed_revision = out.splitlines()[-1]
-            cmd_str = "helm rollback %s %s" % (chart_name, deployed_revision)
+            cmd_str = "helm tiller run kube-system -- helm rollback %s %s" % (chart_name, deployed_revision)
             # return module.fail_json(msg=[out,deployed_revision,cmd_str])
             (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
             if rc:
