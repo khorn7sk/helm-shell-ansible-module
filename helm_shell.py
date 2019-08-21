@@ -51,7 +51,8 @@ def run_module():
         context=dict(type='str', required=False, default=''),
         state=dict(type='str', required=False, default='present'),
         values=dict(type='str', required=False, default=''),
-        tillerless=dict(type='str', required=False, default='False')
+        tillerless=dict(type='str', required=False, default='False'),
+        values_file=dict(type='str', required=False)
     )
 
     # seed the result dict in the object
@@ -88,6 +89,7 @@ def run_module():
     kube_context = module.params['context']
     values = module.params['values']
     tillerless = module.params['tillerless']
+    values_file = module.params['values_file']
 
     # Check if we need to use tillerless helm
     if tillerless == "True":
@@ -95,9 +97,14 @@ def run_module():
     else:
         HELM="helm --tiller-connection-timeout 10 "
 
+    # Check if a values string has been provided
     if values != '':
         values = ' --set ' + values
-    
+
+    # Check if a values_file has been provided
+    if values_file is not None:
+        values_file = " -f " + str(values_file)    
+
     # If version is not provided, we use a 0 to avoid crash
     if module.params['version'] != None:
         chart_version = parse_version(module.params['version'])
@@ -157,7 +164,7 @@ def run_module():
     out = out.splitlines()[-1:]
 
     if len(out) == 0 or not out[-1].strip():  # chart doesn't exist first time, install
-        cmd_str = HELM + "install --namespace='%s' --name='%s' %s --version %s %s" % (chart_namespace, chart_name, chart_location, chart_version, values)
+        cmd_str = HELM + "install --namespace='%s' --name='%s' %s --version %s %s %s" % (chart_namespace, chart_name, chart_location, chart_version, values, values_file)
         (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -166,7 +173,7 @@ def run_module():
         result['original_message'] = out
         return module.exit_json(**result)
     elif out[-1].split()[0].lower() == 'deleted':
-        cmd_str = HELM + "install --namespace='%s' --name='%s' --replace %s %s" % (chart_namespace, chart_name, chart_location, values)
+        cmd_str = HELM + "install --namespace='%s' --name='%s' --replace %s %s %s" % (chart_namespace, chart_name, chart_location, values, values_file)
         (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -181,7 +188,7 @@ def run_module():
         if deployment_status.lower() != "deployed" or chart_version > deployed_version:
             module.debug("Upgrading %s, deployed: %s, deploying: %s, current status: %s" % (
                 chart_name, deployed_version, chart_version, deployment_status))
-            cmd_str = HELM + "upgrade %s %s %s" % (chart_name, chart_location, values)
+            cmd_str = HELM + "upgrade %s %s %s %s" % (chart_name, chart_location, values, values_file)
             (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
             if rc:
                 return module.fail_json(msg=err, rc=rc, cmd=cmd_str)

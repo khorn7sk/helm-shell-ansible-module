@@ -12,6 +12,8 @@
 
 - tillerless: If set to "True" it will use tillerless plugin (note the string, to avoid issues with ansible converting the boolean). Else, it will use helm with --tiller-connection-timeout 10.
 - version: If set, will check against deployed version. If equal, will not change. If version > deployed, will deploy new version. If version < deployed, will rollback to the target version. If unset, will deploy the latest version.
+- values: These values will be passed using --set helm flag
+- values_file: Must be a path to a file with contents in yaml format. This will be passed using -f helm flag
 
 ## Examples
 
@@ -24,6 +26,7 @@ In the following examples we will show a task to deploy Grafana into the cluster
     context: "{{ kube_context }}"
     namespace: monitoring
     values: "grafana.ingress=enabled" # Separate values with commas
+    values_file: {{ role_path }}/files/grafana-values.yaml
     version: 3.8.3
     source:
       type: repo
@@ -39,6 +42,7 @@ In the following examples we will show a task to deploy Grafana into the cluster
     context: "{{ kube_context }}"
     namespace: monitoring
     values: "grafana.ingress=enabled" # Separate values with commas
+    values_file: {{ role_path }}/files/grafana-values.yaml
     version: 3.8.3
     source:
       type: directory
