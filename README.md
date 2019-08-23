@@ -11,12 +11,11 @@
 ## Optional flags
 
 - **tillerless** -> If set to "True" it will use tillerless plugin. Else, it will use helm with --tiller-connection-timeout 10.
-- **version****
-force** -> If set, will check against deployed version. If equal, will not change. If version > deployed, will deploy new version. If version < deployed, will rollback to the target version. If unset, will deploy the latest version.
 - **values** -> These values will be passed using --set helm flag
 - **values_file** -> Must be a path to a file with contents in yaml format. This will be passed using -f helm flag
 - **debug** -> Will run in debug mode
 - **force** -> Used to upgrade chart when chart version is the same
+- **version** -> If version > deployed, will deploy new version. If version < deployed, will rollback to the target version. If equal, will do nothing. If unset, will deploy the latest version.
 
 > Note the string when setting 'True' or 'False', it is to avoid issues with ansible is converting the boolean
 
