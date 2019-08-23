@@ -52,7 +52,9 @@ def run_module():
         state=dict(type='str', required=False, default='present'),
         values=dict(type='str', required=False, default=''),
         tillerless=dict(type='str', required=False, default='False'),
-        values_file=dict(type='str', required=False)
+        values_file=dict(type='str', required=False),
+        debug=dict(type='str', required=False, default='False'),
+        force_install=dict(type='str', required=False, default='False')
     )
 
     # seed the result dict in the object
@@ -90,12 +92,24 @@ def run_module():
     values = module.params['values']
     tillerless = module.params['tillerless']
     values_file = module.params['values_file']
+    debug = module.params['debug']
+    force_install = module.params['force_install']
 
     # Check if we need to use tillerless helm
     if tillerless == "True":
         HELM="helm tiller run kube-system -- helm "
     else:
         HELM="helm --tiller-connection-timeout 10 "
+
+    # Check if we need to use debug mode
+    if debug == "True":
+        debug =" --debug "
+    else:
+        debug = ""
+
+    # Check if we need to force install regardless of version
+    if force_install == "True":
+        force_install = True
 
     # Check if a values string has been provided
     if values != '':
@@ -164,7 +178,7 @@ def run_module():
     out = out.splitlines()[-1:]
 
     if len(out) == 0 or not out[-1].strip():  # chart doesn't exist first time, install
-        cmd_str = HELM + "install --namespace='%s' --name='%s' %s --version %s %s %s" % (chart_namespace, chart_name, chart_location, chart_version, values, values_file)
+        cmd_str = HELM + "install --namespace='%s' --name='%s' %s --version %s %s %s %s" % (chart_namespace, chart_name, chart_location, chart_version, values, values_file, debug)
         (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -173,7 +187,7 @@ def run_module():
         result['original_message'] = out
         return module.exit_json(**result)
     elif out[-1].split()[0].lower() == 'deleted':
-        cmd_str = HELM + "install --namespace='%s' --name='%s' --replace %s %s %s" % (chart_namespace, chart_name, chart_location, values, values_file)
+        cmd_str = HELM + "install --namespace='%s' --name='%s' --replace %s %s %s %s" % (chart_namespace, chart_name, chart_location, values, values_file, debug)
         (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -185,10 +199,10 @@ def run_module():
         out = out[-1].split()  # we split lines and get an array back, now know it's non-empty so take last item
         deployment_status = out[0]
         deployed_version = parse_version(out[1].split('-')[-1])
-        if deployment_status.lower() != "deployed" or chart_version > deployed_version:
+        if deployment_status.lower() != "deployed" or chart_version > deployed_version or force_install is True:
             module.debug("Upgrading %s, deployed: %s, deploying: %s, current status: %s" % (
                 chart_name, deployed_version, chart_version, deployment_status))
-            cmd_str = HELM + "upgrade %s %s %s %s" % (chart_name, chart_location, values, values_file)
+            cmd_str = HELM + "upgrade %s %s %s %s %s" % (chart_name, chart_location, values, values_file, debug)
             (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
             if rc:
                 return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -211,7 +225,7 @@ def run_module():
             # Multiple revisions can have the same version
             # each one will be on their own line so take the newest i.e. the lat one
             deployed_revision = out.splitlines()[-1]
-            cmd_str = HELM + "rollback %s %s" % (chart_name, deployed_revision)
+            cmd_str = HELM + "rollback %s %s %s" % (chart_name, deployed_revision, debug)
             # return module.fail_json(msg=[out,deployed_revision,cmd_str])
             (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
             if rc:
