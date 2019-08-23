@@ -11,24 +11,47 @@ Depends on `helm` command being available on the host it is executed on.
 To run on the host where the playbook was executed, use delegate_to e.g.
 ```
   roles:
-    - role: hypi-charts
+    - role: helm-shell-ansible-module
       delegate_to: 127.0.0.1
 ```
-It assumes kubectl is configured to point to the correct environment so before running, set this using e.g.
+
+It assumes kubectl is configured to point to the correct environment when you provide the flag 'context' This will execute the command:
 ```
 kubectl config use-context staging
 ```
 '''
 
 EXAMPLES = '''
-- name: Install Rook Ceph Operator
+```
+- name: Install Grafana remote chart
   helm_shell:
-    namespace: default
-    name: rook-ceph
-    version: 0.8.0
+    name: grafana
+    context: "{{ kube_context }}"
+    namespace: monitoring
+    values: "grafana.ingress=enabled" # Separate values with commas
+    values_file: {{ role_path }}/files/grafana-values.yaml
+    version: 3.8.3
+    source:
+      type: repo
+      name: stable # Name is mandatory when repo is remote
+      location: https://kubernetes-charts.storage.googleapis.com
+    debug: "True"
+    force_install: "True"
+    tillerless: "False"
+    state: "{{ 'present' if enable_prometheus == true else 'absent' }}"
+
+- name: Install Grafana local chart
+  helm_shell:
+    name: grafana
+    context: "{{ kube_context }}"
+    namespace: monitoring
+    values: "grafana.ingress=enabled" # Separate values with commas
+    values_file: {{ role_path }}/files/grafana-values.yaml
+    version: 3.8.3
     source:
       type: directory
-      location: "{{ role_path }}/files/platform/rook" # could also use some lookup mechanism "{{lookup('<some-lookup-plugin>', '<path-to-chart>')}}"
+      location: "{{ role_path }}/files/charts/grafana"
+    state: "{{ 'present' if enable_grafana == true else 'absent' }}"
 '''
 
 RETURN = '''
@@ -40,7 +63,7 @@ from ansible.module_utils.basic import AnsibleModule
 from pkg_resources import parse_version
 
 def run_module():
-    # TODO add support for global helm args --debug, --home, --host, --kube-context, --tiller-namespace
+    # TODO add support for global helm args --home, --host, --tiller-namespace
     # TODO add support for install --verify, --replace and expand check_mode support to use helm's --dry-run
     # TODO add support for upgrade --verify, --force --recreate-pods and expand check_mode support to use helm's --dry-run
     module_args = dict(
@@ -119,6 +142,9 @@ def run_module():
     if values_file is not None:
         values_file = " -f " + str(values_file)    
 
+    if kube_context != '':
+        kube_context = " --kube-context " + kube_context
+
     # If version is not provided, we use a 0 to avoid crash
     if module.params['version'] != None:
         chart_version = parse_version(module.params['version'])
@@ -140,16 +166,10 @@ def run_module():
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
 
-    if kube_context != '':
-        cmd_str = "kubectl config use-context %s" % kube_context
-        (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-        if rc:
-            return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
-
     # (rc, out, err) = module.run_command("pwd && ls", use_unsafe_shell=True)
     # return module.fail_json(msg=module.jsonify([rc, out, err]))
     if chart_state == 'absent':
-        cmd_str = HELM + "delete '%s'" % chart_name
+        cmd_str = HELM + "delete '%s' %s" % (chart_name, kube_context)
         (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -169,7 +189,7 @@ def run_module():
     if chart_source_type == 'repo':
         chart_location = chart_source_name + "/" + chart_name
         
-    cmd_str = HELM + "ls --all | grep '%s' | cut -f 4,5 | xargs" % chart_name
+    cmd_str = HELM + "ls --all %s | grep '%s' | cut -f 4,5 | xargs" % (kube_context, chart_name)
     (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
     if rc:
         return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -178,7 +198,7 @@ def run_module():
     out = out.splitlines()[-1:]
 
     if len(out) == 0 or not out[-1].strip():  # chart doesn't exist first time, install
-        cmd_str = HELM + "install --namespace='%s' --name='%s' %s --version %s %s %s %s" % (chart_namespace, chart_name, chart_location, chart_version, values, values_file, debug)
+        cmd_str = HELM + "install --namespace='%s' --name='%s' %s --version %s %s %s %s %s" % (chart_namespace, chart_name, chart_location, chart_version, values, values_file, debug, kube_context)
         (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -187,12 +207,12 @@ def run_module():
         result['original_message'] = out
         return module.exit_json(**result)
     elif out[-1].split()[0].lower() == 'deleted':
-        cmd_str = HELM + "install --namespace='%s' --name='%s' --replace %s %s %s %s" % (chart_namespace, chart_name, chart_location, values, values_file, debug)
+        cmd_str = HELM + "install --namespace='%s' --name='%s' --replace %s %s %s %s %s" % (chart_namespace, chart_name, chart_location, values, values_file, debug, kube_context)
         (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
         if rc:
             return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
         result['changed'] = True
-        result['message'] = 'Re-installed (previously deleted) chart %s, version %s' % (chart_name, chart_version)
+        result['message'] = 'Re-installed (previously deleted) chart %s, version %s %s' % (chart_name, chart_version, kube_context)
         result['original_message'] = out
         return module.exit_json(**result)
     else:
@@ -202,7 +222,7 @@ def run_module():
         if deployment_status.lower() != "deployed" or chart_version > deployed_version or force_install is True:
             module.debug("Upgrading %s, deployed: %s, deploying: %s, current status: %s" % (
                 chart_name, deployed_version, chart_version, deployment_status))
-            cmd_str = HELM + "upgrade %s %s %s %s %s" % (chart_name, chart_location, values, values_file, debug)
+            cmd_str = HELM + "upgrade %s %s %s %s %s %s" % (chart_name, chart_location, values, values_file, debug, kube_context)
             (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
             if rc:
                 return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
@@ -213,7 +233,7 @@ def run_module():
         # chart_version = 0 means that version was not specified, so do nothing
         # else if version < deployed_version rollback to the target version
         elif chart_version < deployed_version and chart_version != 0:
-            cmd_str = HELM + "history %s | grep '%s' | cut -f 1" % (chart_name, chart_version)
+            cmd_str = HELM + "history %s %s | grep '%s' | cut -f 1" % (chart_name, kube_context, chart_version)
             (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
             if rc:
                 return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
