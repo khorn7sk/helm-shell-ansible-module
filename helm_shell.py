@@ -1,7 +1,10 @@
 #!/usr/bin/python
+import json
+
+from ansible.module_utils.basic import AnsibleModule
 
 ANSIBLE_METADATA = {
-    'metadata_version': '1.1',
+    'metadata_version': '1.2',
     'status': ['preview'],
     'supported_by': 'community'
 }
@@ -14,228 +17,333 @@ To run on the host where the playbook was executed, use delegate_to e.g.
     - role: hypi-charts
       delegate_to: 127.0.0.1
 ```
-It assumes kubectl is configured to point to the correct environment so before running, set this using e.g.
-```
-kubectl config use-context staging
-```
 '''
 
 EXAMPLES = '''
 - name: Install Rook Ceph Operator
+  chart_deploy_name: ceph-random
   helm_shell:
     namespace: default
     name: rook-ceph
     version: 0.8.0
     source:
       type: directory
-      location: "{{ role_path }}/files/platform/rook" # could also use some lookup mechanism "{{lookup('<some-lookup-plugin>', '<path-to-chart>')}}"
+      location: "{{ role_path }}/files/platform/rook"
 '''
 
 RETURN = '''
 '''
 
-import os.path
+module_args = dict(
+    name=dict(type='str', required=True),
+    chart_deploy_name=dict(type='str', required=True),
+    version=dict(type='str', required=False),
+    source=dict(type='dict', required=True),
+    namespace=dict(type='str', required=False, default='default'),
+    state=dict(type='str', required=False, default='present'),
+    values=dict(type='str', required=False, default=''),
+    tillerless=dict(type='bool', required=False, default=False),
+    values_file=dict(type='str', required=False, default=''),
+    force=dict(type='bool', required=False, default=False)
+)
 
-from ansible.module_utils.basic import AnsibleModule
-from pkg_resources import parse_version
+module = AnsibleModule(
+    argument_spec=module_args,
+    supports_check_mode=True
+)
+
+result = dict(
+    changed=False,
+    original_message='',
+    message=''
+)
+
+
+def install_chart(**kwargs):
+    """
+    Kwargs:
+        helm_exec (str): helm execution command
+        install_type (str): 'install' or 'upgrade' command for helm_cli
+        replace (bool): should we add '--replace' command
+        chart_deploy_name (str): name of chart deployment
+        chart_source_name (str): chart repo name
+        chart_name (str): chart name
+        chart_source_type (str): Type of chart repo 'repo' or 'directory
+        chart_location (str): URL or Path to chart
+        chart_namespace (str): namespace for installing chart
+        chart_version (str): chart version
+        values (str): chart values
+        values_file (str): path to chart value file
+        check_mode (bool): add --dry-run flag
+        force (bool): add --force flag
+    Returns:
+        bool
+        str - raw output from helm install command
+        int - installation code
+    """
+    # Starting build shell command
+    cmd_string = kwargs.get('helm_exec')
+
+    # Get some vars
+    install_type = kwargs.get('install_type')
+    check_mode = kwargs.get('check_mode')
+
+    # Define type of installation 'install' or 'update'
+    if install_type == 'upgrade' and check_mode is False:
+        cmd_string += ' {0} {1}'.format(kwargs.get('install_type'), kwargs.get('chart_deploy_name'))
+    elif install_type == 'upgrade' and check_mode:
+        cmd_string += ' {0} --dry-run {1}'.format(kwargs.get('install_type'), kwargs.get('chart_deploy_name'))
+    elif install_type == 'install' and check_mode is False:
+        cmd_string += ' {0} --name={1}'.format(kwargs.get('install_type'), kwargs.get('chart_deploy_name'))
+    elif install_type == 'install' and check_mode:
+        cmd_string += ' {0} --dry-run --name={1}'.format(kwargs.get('install_type'), kwargs.get('chart_deploy_name'))
+
+    if kwargs.get('force') and install_type == 'upgrade':
+        cmd_string += ' --force'
+
+    if kwargs.get('replace'):
+        cmd_string += ' --replace'
+
+    # Specify path fot local chart repo, and repo name for remote
+    if kwargs.get('chart_source_type') == 'directory':
+        cmd_string += ' {0} --namespace="{1}"'.format(kwargs.get('chart_location'), kwargs.get('chart_namespace'))
+    else:
+        cmd_string += ' {0}/{1} --namespace="{2}"'.format(kwargs.get('chart_source_name'), kwargs.get('chart_name'),
+                                                          kwargs.get('chart_namespace'))
+
+    # Specify chart version
+    if kwargs.get('chart_version'):
+        cmd_string += ' --version="{0}"'.format(kwargs.get('chart_version'))
+
+    # Specify chart values
+    if kwargs.get('values'):
+        cmd_string += ' --set {0}'.format(kwargs.get('values'))
+
+    # Specify chart values file
+    if kwargs.get('values_file'):
+        cmd_string += ' -f {0}'.format(kwargs.get('values_file'))
+
+    if check_mode is False:
+        cmd_string += ' --output json'
+
+    (_rc, install_chart_output_raw, _err) = module.run_command(cmd_string, use_unsafe_shell=True)
+    if _rc:
+        return module.fail_json(msg=_err, rc=_rc, cmd=cmd_string)
+
+    # Load output to json format and pars installation code
+    if check_mode is False:
+        install_chart_output = json.loads(install_chart_output_raw)
+        install_code = install_chart_output['info']['status']['code']
+    else:
+        install_chart_output = install_chart_output_raw
+        install_code = 1
+
+    if install_code == 1:
+        return True, install_chart_output, install_code, cmd_string
+    else:
+        return False, install_chart_output, install_code, cmd_string
+
+
+def get_chart_lists(helm_exec):
+    """
+    Args:
+        helm_exec (str): helm execution command
+    Returns:
+        dist of all charts name and status
+    """
+    _cmd_str = helm_exec + 'list --all --output json'
+    (_rc, helm_chart_list_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
+    if _rc:
+        return module.fail_json(msg=_err, rc=_rc, cmd=_cmd_str)
+
+    # Return None if no one charts installed
+    if len(helm_chart_list_raw) == 0:
+        return ''
+
+    # Parse chart names
+    helm_chart_list = {}
+    for chart in json.loads(helm_chart_list_raw)['Releases']:
+        helm_chart_list.update({chart['Name']: chart['Status']})
+
+    return helm_chart_list
+
+
+def remove_chart(helm_exec, chart_deploy_name, check_mode):
+    """
+    Args:
+        helm_exec (str): helm execution command
+        chart_deploy_name (str): chart name
+        check_mode (bool): run with --dry-run flag
+    """
+    if check_mode is False:
+        _cmd_str = helm_exec + 'delete "{0}" --purge'.format(chart_deploy_name)
+    else:
+        _cmd_str = helm_exec + 'delete "{0}" --purge --dry-run'.format(chart_deploy_name)
+
+    (_rc, remove_chart_output_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
+    if _rc:
+        return module.fail_json(msg=_err, rc=_rc, cmd=_cmd_str)
+
+    # Check output and fail task when not find 'deleted message in output'
+    if 'deleted' in remove_chart_output_raw:
+        result['changed'] = True
+        result['message'] = 'Deleted chart {0}'.format(chart_deploy_name)
+        result['original_message'] = remove_chart_output_raw
+        return module.exit_json(**result)
+    else:
+        return module.fail_json(msg='Cant remove chart: {0}'.format(chart_deploy_name), rc=_rc, cmd=_cmd_str)
+
+
+def check_repo(helm_exec, chart_source_name, chart_location):
+    """
+    Args:
+        helm_exec (str): helm execution command
+        chart_source_name (str): chart name
+        chart_location (str): chart remote URL
+    Returns:
+        bool
+    """
+
+    # Get installed repo list
+    _cmd_str = helm_exec + 'repo list -o json'
+    (_rc, repo_list_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
+    if _rc:
+        return module.fail_json(msg=_err, rc=repo_list_raw, cmd=_cmd_str)
+
+    repo_list = json.loads(repo_list_raw)
+
+    # Check if repo already added
+    for repo in repo_list:
+        if chart_source_name in repo['Name'] and chart_location in repo['URL']:
+            return True
+
+    return False
+
+
+def update_repo(helm_exec, chart_source_name):
+    """
+    Args:
+        helm_exec (str): helm execution command
+        chart_source_name (str): chart name
+    Returns:
+        bool
+    """
+    # Update repo
+    _cmd_str = helm_exec + 'repo update {0}'.format(chart_source_name)
+    (_rc, update_repo_output_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
+    if _rc:
+        return module.fail_json(msg=_err, rc=_rc, cmd=_cmd_str)
+
+    for line in update_repo_output_raw.splitlines():
+        if 'Update Complete.' in line:
+            return True
+
+    return False
+
+
+def add_repo(helm_exec, chart_source_name, chart_location):
+    """
+    Args:
+        helm_exec (str): helm execution command
+        chart_source_name (str): chart name
+        chart_location (str): chart remote URL
+    Returns:
+        bool
+    """
+    _cmd_str = helm_exec + 'repo add {0} {1}'.format(chart_source_name, chart_location)
+    (_rc, _out, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
+    if _rc:
+        return module.fail_json(msg=_err, rc=_rc, cmd=_cmd_str)
+
+    if check_repo(helm_exec, chart_source_name, chart_location):
+        return True
+    else:
+        return False
+
 
 def run_module():
-    # TODO add support for global helm args --debug, --home, --host, --kube-context, --tiller-namespace
-    # TODO add support for install --verify, --replace and expand check_mode support to use helm's --dry-run
-    # TODO add support for upgrade --verify, --force --recreate-pods and expand check_mode support to use helm's --dry-run
-    module_args = dict(
-        name=dict(type='str', required=True),
-        version=dict(type='str', required=False),
-        source=dict(type='dict', required=True),
-        namespace=dict(type='str', required=False, default='default'),
-        context=dict(type='str', required=False, default=''),
-        state=dict(type='str', required=False, default='present'),
-        values=dict(type='str', required=False, default=''),
-        tillerless=dict(type='str', required=False, default='False'),
-        values_file=dict(type='str', required=False),
-        debug=dict(type='str', required=False, default='False'),
-        force_install=dict(type='str', required=False, default='False')
-    )
-
-    # seed the result dict in the object
-    # we primarily care about changed and state
-    # change is if this module effectively modified the target
-    # state will include any data that you want your module to pass back
-    # for consumption, for example, in a subsequent task
-    result = dict(
-        changed=False,
-        original_message='',
-        message=''
-    )
-
-    # the AnsibleModule object will be our abstraction working with Ansible
-    # this includes instantiation, a couple of common attr would be the
-    # args/params passed to the execution, as well as if the module
-    # supports check mode
-    module = AnsibleModule(
-        argument_spec=module_args,
-        supports_check_mode=True
-    )
-
-    # if the user is working with this module in only check mode we do not
-    # want to make any changes to the environment, just return the current
-    # state with no modifications
-    if module.check_mode:
-        return result
-
     chart_namespace = module.params['namespace']
     chart_state = module.params['state']
     chart_name = module.params['name']
+    chart_deploy_name = module.params['chart_deploy_name']
     chart_location = module.params['source']['location']
-    chart_source_type = module.params['source']['type'] # Only remote repos
-    kube_context = module.params['context']
+    chart_source_type = module.params['source']['type']
     values = module.params['values']
     tillerless = module.params['tillerless']
     values_file = module.params['values_file']
-    debug = module.params['debug']
-    force_install = module.params['force_install']
+    force = module.params['force']
+    chart_version = module.params['version']
+    chart_source_name = module.params['source']['name'] if chart_source_type == 'repo' else ''
 
     # Check if we need to use tillerless helm
-    if tillerless == "True":
-        HELM="helm tiller run kube-system -- helm "
+    if tillerless:
+        helm_exec = 'helm tiller run kube-system -- helm '
     else:
-        HELM="helm --tiller-connection-timeout 10 "
+        helm_exec = 'helm --tiller-connection-timeout 10 '
 
-    # Check if we need to use debug mode
-    if debug == "True":
-        debug =" --debug "
-    else:
-        debug = ""
+    # Get chart lists
+    helm_charts_list = get_chart_lists(helm_exec)
 
-    # Check if we need to force install regardless of version
-    if force_install == "True":
-        force_install = True
-
-    # Check if a values string has been provided
-    if values != '':
-        values = ' --set ' + values
-
-    # Check if a values_file has been provided
-    if values_file is not None:
-        values_file = " -f " + str(values_file)    
-
-    # If version is not provided, we use a 0 to avoid crash
-    if module.params['version'] != None:
-        chart_version = parse_version(module.params['version'])
-    else:
-        chart_version = 0
-
-    if chart_source_type == 'repo':
-        chart_source_name = module.params['source']['name'] # Only used for remote repos
-
-        # Add the repo
-        cmd_str = HELM + "repo add %s %s" % (chart_source_name, chart_location) 
-        (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-        if rc:
-            return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
-        
-        # Update repo
-        cmd_str = HELM + "repo update"
-        (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-        if rc:
-            return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
-
-    if kube_context != '':
-        cmd_str = "kubectl config use-context %s" % kube_context
-        (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-        if rc:
-            return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
-
-    # (rc, out, err) = module.run_command("pwd && ls", use_unsafe_shell=True)
-    # return module.fail_json(msg=module.jsonify([rc, out, err]))
+    # Remove chart if state 'absent'
     if chart_state == 'absent':
-        cmd_str = HELM + "delete '%s'" % chart_name
-        (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-        if rc:
-            return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
-        result['changed'] = True
-        result['message'] = 'Deleted chart %s' % chart_name
-        result['original_message'] = out
-        return module.exit_json(**result)
+        if chart_deploy_name in helm_charts_list:
+            remove_chart(helm_exec, chart_deploy_name, module.check_mode)
+        elif chart_deploy_name not in helm_charts_list:
+            result['changed'] = False
+            result['message'] = 'Chart with name "{0}" already is not installed'.format(chart_deploy_name)
+            return module.exit_json(**result)
 
-    req_file = os.path.join(chart_location, 'requirements.yaml')
-    if os.path.isfile(req_file):
-        cmd_str = HELM + "dependency update %s" % chart_location
-        (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-        if rc:
-            return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
+    # Add/update remote repository
+    if module.check_mode is False:
+        if chart_source_type == 'repo' and check_repo(helm_exec, chart_source_name, chart_location):
+            if add_repo(helm_exec, chart_source_name, chart_location) is False:
+                return module.fail_json(msg='Cant add chart repo with name: %s' % chart_source_name)
+        if update_repo(helm_exec, chart_source_name) is False:
+            return module.fail_json(msg='Cant upgrade chart repo with name: %s' % chart_source_name)
 
-    # For remote repos location consists in chart repo name + chart name
-    if chart_source_type == 'repo':
-        chart_location = chart_source_name + "/" + chart_name
-        
-    cmd_str = HELM + "ls --all | grep '%s' | cut -f 4,5 | xargs" % chart_name
-    (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-    if rc:
-        return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
-    # multiple lines can be returned if the chart is installed under different names and grep matches a substring
-    # so we take the latest one i.e. very last one of the list
-    out = out.splitlines()[-1:]
-
-    if len(out) == 0 or not out[-1].strip():  # chart doesn't exist first time, install
-        cmd_str = HELM + "install --namespace='%s' --name='%s' %s --version %s %s %s %s" % (chart_namespace, chart_name, chart_location, chart_version, values, values_file, debug)
-        (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-        if rc:
-            return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
+    # Chart doesn't exist first time, install
+    if chart_deploy_name not in helm_charts_list:
+        (ex_result, msg, code, cmd_str) = install_chart(helm_exec=helm_exec, install_type='install', replace=False,
+                                                        chart_deploy_name=chart_deploy_name,
+                                                        chart_source_name=chart_source_name,
+                                                        chart_name=chart_name, chart_namespace=chart_namespace,
+                                                        chart_version=chart_version, values=values,
+                                                        values_file=values_file, chart_source_type=chart_source_type,
+                                                        chart_location=chart_location, check_mode=module.check_mode,
+                                                        force=force)
+    # Chart exist, but in status 'DELETED', reinstall
+    elif chart_deploy_name in helm_charts_list and helm_charts_list[chart_deploy_name] == 'DELETED':
+        (ex_result, msg, code, cmd_str) = install_chart(helm_exec=helm_exec, install_type='install', replace=True,
+                                                        chart_deploy_name=chart_deploy_name,
+                                                        chart_source_name=chart_source_name,
+                                                        chart_name=chart_name, chart_namespace=chart_namespace,
+                                                        chart_version=chart_version, values=values,
+                                                        values_file=values_file, chart_source_type=chart_source_type,
+                                                        chart_location=chart_location, check_mode=module.check_mode,
+                                                        force=force)
+    # Chart exist, but in status 'DEPLOYED', upgrade
+    else:
+        (ex_result, msg, code, cmd_str) = install_chart(helm_exec=helm_exec, install_type='upgrade',
+                                                        chart_deploy_name=chart_deploy_name,
+                                                        chart_source_name=chart_source_name,
+                                                        chart_name=chart_name, chart_namespace=chart_namespace,
+                                                        chart_version=chart_version, values=values,
+                                                        values_file=values_file, chart_source_type=chart_source_type,
+                                                        chart_location=chart_location, check_mode=module.check_mode,
+                                                        force=force)
+    # Change task status
+    if ex_result:
+        chart_version = 'latest' if chart_version is False else chart_version
         result['changed'] = True
-        result['message'] = 'Installed chart %s, version %s' % (chart_name, chart_version)
-        result['original_message'] = out
-        return module.exit_json(**result)
-    elif out[-1].split()[0].lower() == 'deleted':
-        cmd_str = HELM + "install --namespace='%s' --name='%s' --replace %s %s %s %s" % (chart_namespace, chart_name, chart_location, values, values_file, debug)
-        (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-        if rc:
-            return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
-        result['changed'] = True
-        result['message'] = 'Re-installed (previously deleted) chart %s, version %s' % (chart_name, chart_version)
-        result['original_message'] = out
+        result['message'] = 'Installed chart {0}, version {1}'.format(chart_deploy_name, chart_version)
+        result['original_message'] = msg
+        result['cmd'] = cmd_str
         return module.exit_json(**result)
     else:
-        out = out[-1].split()  # we split lines and get an array back, now know it's non-empty so take last item
-        deployment_status = out[0]
-        deployed_version = parse_version(out[1].split('-')[-1])
-        if deployment_status.lower() != "deployed" or chart_version > deployed_version or force_install is True:
-            module.debug("Upgrading %s, deployed: %s, deploying: %s, current status: %s" % (
-                chart_name, deployed_version, chart_version, deployment_status))
-            cmd_str = HELM + "upgrade %s %s %s %s %s" % (chart_name, chart_location, values, values_file, debug)
-            (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-            if rc:
-                return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
-            result['changed'] = True
-            result['message'] = 'Upgraded chart %s, version %s' % (chart_name, chart_version)
-            result['original_message'] = out
-            return module.exit_json(**result)
-        # chart_version = 0 means that version was not specified, so do nothing
-        # else if version < deployed_version rollback to the target version
-        elif chart_version < deployed_version and chart_version != 0:
-            cmd_str = HELM + "history %s | grep '%s' | cut -f 1" % (chart_name, chart_version)
-            (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-            if rc:
-                return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
-            if not out.strip():
-                return module.fail_json(msg="Cannot downgrade %s has never been deployed at version %s. "
-                                            "Its status is currently %s at a version of '%s'" % (
-                                                chart_name, chart_version, deployment_status.lower(),
-                                                str(deployed_version)))
-            # Multiple revisions can have the same version
-            # each one will be on their own line so take the newest i.e. the lat one
-            deployed_revision = out.splitlines()[-1]
-            cmd_str = HELM + "rollback %s %s %s" % (chart_name, deployed_revision, debug)
-            # return module.fail_json(msg=[out,deployed_revision,cmd_str])
-            (rc, out, err) = module.run_command(cmd_str, use_unsafe_shell=True)
-            if rc:
-                return module.fail_json(msg=err, rc=rc, cmd=cmd_str)
-            result['changed'] = True
-            result['message'] = 'Rolled back chart %s to version version %s, revision %s' % (
-                chart_name, chart_version, deployed_revision)
-            result['original_message'] = out
-            return module.exit_json(**result)
-    module.exit_json(**result)
+        return module.fail_json(msg='Chart {0} is not installed'.format(chart_deploy_name),
+                                original_message=msg,
+                                install_code=code,
+                                cmd=cmd_str)
 
 
 def main():
