@@ -1,5 +1,6 @@
 #!/usr/bin/python
 import json
+import os
 
 from ansible.module_utils.basic import AnsibleModule
 
@@ -57,6 +58,14 @@ result = dict(
     original_message='',
     message=''
 )
+
+
+def remove_tmp_file(values_file):
+    if values_file != "":
+        try:
+            os.remove(values_file)
+        except Exception as err:
+            raise Exception('Cant remove tmp file on the remove host. Reason: ' + str(err))
 
 
 def install_chart(**kwargs):
@@ -128,7 +137,7 @@ def install_chart(**kwargs):
 
     (_rc, install_chart_output_raw, _err) = module.run_command(cmd_string, use_unsafe_shell=True)
     if _rc:
-        return module.fail_json(msg=_err, rc=_rc, cmd=cmd_string)
+        return module.exit_json(original_message=_err, cmd=cmd_string, changed=False, failed=True)
 
     # Load output to json format and pars installation code
     if check_mode is False:
@@ -154,7 +163,7 @@ def get_chart_lists(helm_exec):
     _cmd_str = helm_exec + 'list --all --output json'
     (_rc, helm_chart_list_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
     if _rc:
-        return module.fail_json(msg=_err, rc=_rc, cmd=_cmd_str)
+        return module.exit_json(original_message=_err, cmd=_cmd_str, changed=False, failed=True)
 
     # Return None if no one charts installed
     if len(helm_chart_list_raw) == 0:
@@ -182,16 +191,18 @@ def remove_chart(helm_exec, chart_deploy_name, check_mode):
 
     (_rc, remove_chart_output_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
     if _rc:
-        return module.fail_json(msg=_err, rc=_rc, cmd=_cmd_str)
+        return module.exit_json(original_message=_err, cmd=_cmd_str, changed=False, failed=True)
 
     # Check output and fail task when not find 'deleted message in output'
     if 'deleted' in remove_chart_output_raw:
         result['changed'] = True
+        result['failed'] = False
         result['message'] = 'Deleted chart {0}'.format(chart_deploy_name)
         result['original_message'] = remove_chart_output_raw
         return module.exit_json(**result)
     else:
-        return module.fail_json(msg='Cant remove chart: {0}'.format(chart_deploy_name), rc=_rc, cmd=_cmd_str)
+        return module.exit_json(original_message='Cant remove chart: {0}'.format(chart_deploy_name), cmd=_cmd_str,
+                                changed=False, failed=True)
 
 
 def check_repo(helm_exec, chart_source_name, chart_location):
@@ -208,7 +219,7 @@ def check_repo(helm_exec, chart_source_name, chart_location):
     _cmd_str = helm_exec + 'repo list -o json'
     (_rc, repo_list_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
     if _rc:
-        return module.fail_json(msg=_err, rc=repo_list_raw, cmd=_cmd_str)
+        return module.exit_json(original_message=_err, cmd=_cmd_str, changed=False, failed=True)
 
     repo_list = json.loads(repo_list_raw)
 
@@ -232,7 +243,7 @@ def update_repo(helm_exec, chart_source_name):
     _cmd_str = helm_exec + 'repo update {0}'.format(chart_source_name)
     (_rc, update_repo_output_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
     if _rc:
-        return module.fail_json(msg=_err, rc=_rc, cmd=_cmd_str)
+        return module.exit_json(original_message=_err, cmd=_cmd_str, changed=False, failed=True)
 
     for line in update_repo_output_raw.splitlines():
         if 'Update Complete.' in line:
@@ -253,7 +264,7 @@ def add_repo(helm_exec, chart_source_name, chart_location):
     _cmd_str = helm_exec + 'repo add {0} {1}'.format(chart_source_name, chart_location)
     (_rc, _out, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
     if _rc:
-        return module.fail_json(msg=_err, rc=_rc, cmd=_cmd_str)
+        return module.exit_json(original_message=_err, cmd=_cmd_str, changed=False, failed=True)
 
     if check_repo(helm_exec, chart_source_name, chart_location):
         return True
@@ -290,16 +301,22 @@ def run_module():
             remove_chart(helm_exec, chart_deploy_name, module.check_mode)
         elif chart_deploy_name not in helm_charts_list:
             result['changed'] = False
+            result['failed'] = False
             result['message'] = 'Chart with name "{0}" already is not installed'.format(chart_deploy_name)
+            remove_tmp_file(values_file)
             return module.exit_json(**result)
 
     # Add/update remote repository
     if module.check_mode is False:
         if chart_source_type == 'repo' and check_repo(helm_exec, chart_source_name, chart_location):
             if add_repo(helm_exec, chart_source_name, chart_location) is False:
-                return module.fail_json(msg='Cant add chart repo with name: %s' % chart_source_name)
+                remove_tmp_file(values_file)
+                return module.exit_json(msg='Cant add chart repo with name: %s' % chart_source_name, changed=False,
+                                        failed=True)
         if update_repo(helm_exec, chart_source_name) is False:
-            return module.fail_json(msg='Cant upgrade chart repo with name: %s' % chart_source_name)
+            remove_tmp_file(values_file)
+            return module.exit_json(msg='Cant upgrade chart repo with name: %s' % chart_source_name, changed=False,
+                                    failed=True)
 
     # Chart doesn't exist first time, install
     if chart_deploy_name not in helm_charts_list:
@@ -335,15 +352,16 @@ def run_module():
     if ex_result:
         chart_version = 'latest' if chart_version is False else chart_version
         result['changed'] = True
+        result['failed'] = False
         result['message'] = 'Installed chart {0}, version {1}'.format(chart_deploy_name, chart_version)
         result['original_message'] = msg
         result['cmd'] = cmd_str
+        remove_tmp_file(values_file)
         return module.exit_json(**result)
     else:
-        return module.fail_json(msg='Chart {0} is not installed'.format(chart_deploy_name),
-                                original_message=msg,
-                                install_code=code,
-                                cmd=cmd_str)
+        remove_tmp_file(values_file)
+        return module.exit_json(msg='Chart {0} is not installed'.format(chart_deploy_name), original_message=msg,
+                                cmd=cmd_str, changed=False, failed=True)
 
 
 def main():
