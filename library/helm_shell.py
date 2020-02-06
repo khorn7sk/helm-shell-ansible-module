@@ -308,7 +308,7 @@ def run_module():
 
     # Add/update remote repository
     if module.check_mode is False:
-        if chart_source_type == 'repo' and check_repo(helm_exec, chart_source_name, chart_location):
+        if chart_source_type == 'repo' and check_repo(helm_exec, chart_source_name, chart_location) is False:
             if add_repo(helm_exec, chart_source_name, chart_location) is False:
                 remove_tmp_file(values_file)
                 return module.exit_json(msg='Cant add chart repo with name: %s' % chart_source_name, changed=False,

@@ -41,7 +41,7 @@ class ActionModule(ActionBase):
         tmp_src_file = ''
 
         # If value file is present copy them to remote host
-        if value_file is not None:
+        if value_file != '':
             # Find the source value file
             value_file_path = self._find_needle('files', value_file)
 
@@ -76,7 +76,7 @@ class ActionModule(ActionBase):
                                              task_vars=task_vars, tmp=tmp)
 
         # Cleanup tmp the files
-        if value_file is not None:
+        if value_file != '':
             try:
                 os.remove(content_tempfile)
             except Exception as err:
