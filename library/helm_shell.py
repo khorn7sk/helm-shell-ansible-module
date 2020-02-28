@@ -141,7 +141,7 @@ def install_chart(**kwargs):
     # Load output to json format and pars installation code
     if check_mode is False:
         chart_output = json.loads(chart_output_raw)
-        install_status = chart_output[kwargs.get('chart_deploy_name')]['status']
+        install_status = chart_output['info']['status']
     else:
         chart_output = chart_output_raw
         install_status = 'deployed'
