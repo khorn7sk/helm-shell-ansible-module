@@ -86,7 +86,8 @@ def install_chart(**kwargs):
     Returns:
         bool
         str - raw output from helm install command
-        int - installation code
+        str - installation status
+        str - command string
     """
     # Starting build shell command
     cmd_string = 'helm '
@@ -133,23 +134,26 @@ def install_chart(**kwargs):
     if check_mode is False:
         cmd_string += ' --output json'
 
-    (_rc, install_chart_output_raw, _err) = module.run_command(cmd_string, use_unsafe_shell=True)
+    (_rc, chart_output_raw, _err) = module.run_command(cmd_string, use_unsafe_shell=True)
     if _rc:
         return module.exit_json(original_message=_err, cmd=cmd_string, changed=False, failed=True)
 
     # Load output to json format and pars installation code
     if check_mode is False:
-        install_chart_output = json.loads(install_chart_output_raw)
-        print(install_chart_output_raw)
-        install_code = install_chart_output['info']['status']['code']
+        chart_output = json.loads(chart_output_raw)
+        install_status = chart_output[kwargs.get('chart_deploy_name')]['status']
     else:
-        install_chart_output = install_chart_output_raw
-        install_code = 1
+        chart_output = chart_output_raw
+        install_status = 'deployed'
 
-    if install_code == 1:
-        return True, install_chart_output, install_code, cmd_string
+    # Truncate output if output is too lenght
+    if len(chart_output) >= 128:
+        chart_output = chart_output[:128] + '...'
+
+    if install_status == 'deployed':
+        return True, chart_output, install_status, cmd_string
     else:
-        return False, install_chart_output, install_code, cmd_string
+        return False, chart_output, install_status, cmd_string
 
 
 def get_chart_lists():
@@ -304,34 +308,34 @@ def run_module():
 
     # Chart doesn't exist first time, install
     if chart_deploy_name not in helm_charts_list:
-        (ex_result, msg, code, cmd_str) = install_chart(install_type='install', replace=False,
-                                                        chart_deploy_name=chart_deploy_name,
-                                                        chart_source_name=chart_source_name,
-                                                        chart_name=chart_name, chart_namespace=chart_namespace,
-                                                        chart_version=chart_version, values=values,
-                                                        values_file=values_file, chart_source_type=chart_source_type,
-                                                        chart_location=chart_location, check_mode=module.check_mode,
-                                                        force=force)
+        (ex_result, msg, status, cmd_str) = install_chart(install_type='install', replace=False,
+                                                          chart_deploy_name=chart_deploy_name,
+                                                          chart_source_name=chart_source_name,
+                                                          chart_name=chart_name, chart_namespace=chart_namespace,
+                                                          chart_version=chart_version, values=values,
+                                                          values_file=values_file, chart_source_type=chart_source_type,
+                                                          chart_location=chart_location, check_mode=module.check_mode,
+                                                          force=force)
     # Chart exist, but in status 'DELETED', reinstall
     elif chart_deploy_name in helm_charts_list and helm_charts_list[chart_deploy_name] == 'DELETED':
-        (ex_result, msg, code, cmd_str) = install_chart(install_type='install', replace=True,
-                                                        chart_deploy_name=chart_deploy_name,
-                                                        chart_source_name=chart_source_name,
-                                                        chart_name=chart_name, chart_namespace=chart_namespace,
-                                                        chart_version=chart_version, values=values,
-                                                        values_file=values_file, chart_source_type=chart_source_type,
-                                                        chart_location=chart_location, check_mode=module.check_mode,
-                                                        force=force)
+        (ex_result, msg, status, cmd_str) = install_chart(install_type='install', replace=True,
+                                                          chart_deploy_name=chart_deploy_name,
+                                                          chart_source_name=chart_source_name,
+                                                          chart_name=chart_name, chart_namespace=chart_namespace,
+                                                          chart_version=chart_version, values=values,
+                                                          values_file=values_file, chart_source_type=chart_source_type,
+                                                          chart_location=chart_location, check_mode=module.check_mode,
+                                                          force=force)
     # Chart exist, but in status 'DEPLOYED', upgrade
     else:
-        (ex_result, msg, code, cmd_str) = install_chart(install_type='upgrade',
-                                                        chart_deploy_name=chart_deploy_name,
-                                                        chart_source_name=chart_source_name,
-                                                        chart_name=chart_name, chart_namespace=chart_namespace,
-                                                        chart_version=chart_version, values=values,
-                                                        values_file=values_file, chart_source_type=chart_source_type,
-                                                        chart_location=chart_location, check_mode=module.check_mode,
-                                                        force=force)
+        (ex_result, msg, status, cmd_str) = install_chart(install_type='upgrade',
+                                                          chart_deploy_name=chart_deploy_name,
+                                                          chart_source_name=chart_source_name,
+                                                          chart_name=chart_name, chart_namespace=chart_namespace,
+                                                          chart_version=chart_version, values=values,
+                                                          values_file=values_file, chart_source_type=chart_source_type,
+                                                          chart_location=chart_location, check_mode=module.check_mode,
+                                                          force=force)
     # Change task status
     if ex_result:
         chart_version = 'latest' if chart_version is False else chart_version
