@@ -6,8 +6,8 @@ __metaclass__ = type
 import os
 import tempfile
 
+import yaml
 from ansible import constants as _const
-from ansible.module_utils._text import to_bytes
 from ansible.plugins.action import ActionBase
 from jsonmerge import merge
 
@@ -15,16 +15,14 @@ from jsonmerge import merge
 def _create_content_tempfile(content):
     # Create a tempfile containing defined content
     tmp_file_dir, content_tempfile = tempfile.mkstemp(dir=_const.DEFAULT_LOCAL_TMP)
-    tmp_file = os.fdopen(tmp_file_dir, 'wb')
-    content = to_bytes(content)
+
     try:
-        tmp_file.write(content)
+        with open(content_tempfile, 'w') as yml:
+            yaml.safe_dump(content, yml, allow_unicode=True)
     except Exception as err:
         os.remove(content_tempfile)
         result = {'failed': True, 'message': err}
         return result
-    finally:
-        tmp_file.close()
     return content_tempfile
 
 
