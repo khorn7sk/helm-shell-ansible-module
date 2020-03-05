@@ -9,6 +9,7 @@ import tempfile
 from ansible import constants as _const
 from ansible.module_utils._text import to_bytes
 from ansible.plugins.action import ActionBase
+from jsonmerge import merge
 
 
 def _create_content_tempfile(content):
@@ -29,46 +30,81 @@ def _create_content_tempfile(content):
 
 class ActionModule(ActionBase):
 
+    def save_values_file(self, value_file_content):
+        result = dict
+
+        # Create temp file on localhost
+        content_tempfile = _create_content_tempfile(value_file_content)
+
+        # Create tmp dir in remote host
+        try:
+            tmp_src_dir = self._make_tmp_path()
+        except Exception as err:
+            result['failed'] = True
+            result['message'] = str(err)
+            return result
+
+        tmp_src_file = tmp_src_dir + os.path.basename(content_tempfile) + '.yaml'
+
+        # Copy file from localhost to remote host
+        try:
+            self._connection.put_file(content_tempfile, tmp_src_file)
+        except Exception as err:
+            result['failed'] = True
+            result['message'] = err
+            return result
+
+        return tmp_src_file, content_tempfile
+
+    def read_values_file(self, value_file):
+        # Find the source value file
+        value_file_path = self._find_needle('files', value_file)
+
+        # Read value file
+        with open(value_file_path, "r") as _file:
+            value_file_source = _file.read()
+
+        return value_file_source
+
+    def get_module_args(self):
+        module_args = self._task.args.copy()
+        value_file = module_args['values_file']
+        values = module_args['values']
+        values_file_content = ''
+
+        # Read values file
+        if value_file != '':
+            values_file_content = self.read_values_file(value_file)
+
+        # Render values
+        if value_file != '' and values != '':
+            values_content = merge(values_file_content, values)
+        elif value_file != '':
+            values_content = values_file_content
+        elif values != '':
+            values_content = values
+        else:
+            values_content = ''
+
+        # Save final version of values to args
+        if values_content != '':
+            module_args['values'] = values_content
+            del module_args['values_file']
+
+        return module_args
+
     def run(self, tmp=None, task_vars=None):
 
         super(ActionModule, self).run(tmp, task_vars)
+        content_tempfile = ''
 
         # Get module args
-        module_args = self._task.args.copy()
-        value_file = module_args['values_file']
-        result = dict()
-        content_tempfile = ''
-        tmp_src_file = ''
+        module_args = self.get_module_args()
 
-        # If value file is present copy them to remote host
-        if value_file != '':
-            # Find the source value file
-            value_file_path = self._find_needle('files', value_file)
-
-            # Read value file
-            with open(value_file_path, "r") as _file:
-                value_file_content = _file.read()
-
-            content_tempfile = _create_content_tempfile(value_file_content)
-
-            # Create tmp dir in remote host
-            try:
-                tmp_src_dir = self._make_tmp_path()
-            except Exception as err:
-                result['failed'] = True
-                result['message'] = str(err)
-                return result
-
-            tmp_src_file = tmp_src_dir + os.path.basename(content_tempfile) + '.yaml'
-            module_args['values_file'] = tmp_src_file
-
-            # Copy file from localhost to remote host
-            try:
-                self._connection.put_file(content_tempfile, tmp_src_file)
-            except Exception as err:
-                result['failed'] = True
-                result['message'] = err
-                return result
+        # Save values to file
+        if module_args['values'] != '':
+            module_args['values_file'], content_tempfile = self.save_values_file(module_args['values'])
+            del module_args['values']
 
         # Execute helm_shell module
         module_return = self._execute_module(module_name='helm_shell',
@@ -76,15 +112,10 @@ class ActionModule(ActionBase):
                                              task_vars=task_vars, tmp=tmp)
 
         # Cleanup tmp the files
-        if value_file != '':
+        if content_tempfile != '':
             try:
                 os.remove(content_tempfile)
             except Exception as err:
                 raise Exception('Cant remove tmp file on localhost. Reason: ' + str(err))
 
-        result['failed'] = module_return.get('failed')
-        result['changed'] = module_return.get('changed')
-        result['message'] = module_return.get('message')
-        result['original_message'] = module_return.get('original_message')
-        result['cmd'] = module_return.get('cmd')
-        return result
+        return module_return

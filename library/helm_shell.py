@@ -42,7 +42,6 @@ module_args = dict(
     source=dict(type='dict', required=True),
     namespace=dict(type='str', required=False, default='default'),
     state=dict(type='str', required=False, default='present'),
-    values=dict(type='str', required=False, default=''),
     values_file=dict(type='str', required=False, default=''),
     force=dict(type='bool', required=False, default=False)
 )
@@ -79,7 +78,6 @@ def install_chart(**kwargs):
         chart_location (str): URL or Path to chart
         chart_namespace (str): namespace for installing chart
         chart_version (str): chart version
-        values (str): chart values
         values_file (str): path to chart value file
         check_mode (bool): add --dry-run flag
         force (bool): add --force flag
@@ -122,10 +120,6 @@ def install_chart(**kwargs):
     # Specify chart version
     if kwargs.get('chart_version'):
         cmd_string += ' --version="{0}"'.format(kwargs.get('chart_version'))
-
-    # Specify chart values
-    if kwargs.get('values'):
-        cmd_string += ' --set {0}'.format(kwargs.get('values'))
 
     # Specify chart values file
     if kwargs.get('values_file'):
@@ -274,7 +268,6 @@ def run_module():
     chart_deploy_name = module.params['chart_deploy_name']
     chart_location = module.params['source']['location']
     chart_source_type = module.params['source']['type']
-    values = module.params['values']
     values_file = module.params['values_file']
     force = module.params['force']
     chart_version = module.params['version']
@@ -312,8 +305,8 @@ def run_module():
                                                           chart_deploy_name=chart_deploy_name,
                                                           chart_source_name=chart_source_name,
                                                           chart_name=chart_name, chart_namespace=chart_namespace,
-                                                          chart_version=chart_version, values=values,
-                                                          values_file=values_file, chart_source_type=chart_source_type,
+                                                          chart_version=chart_version, values_file=values_file,
+                                                          chart_source_type=chart_source_type,
                                                           chart_location=chart_location, check_mode=module.check_mode,
                                                           force=force)
     # Chart exist, but in status 'DELETED', reinstall
@@ -322,8 +315,8 @@ def run_module():
                                                           chart_deploy_name=chart_deploy_name,
                                                           chart_source_name=chart_source_name,
                                                           chart_name=chart_name, chart_namespace=chart_namespace,
-                                                          chart_version=chart_version, values=values,
-                                                          values_file=values_file, chart_source_type=chart_source_type,
+                                                          chart_version=chart_version, values_file=values_file,
+                                                          chart_source_type=chart_source_type,
                                                           chart_location=chart_location, check_mode=module.check_mode,
                                                           force=force)
     # Chart exist, but in status 'DEPLOYED', upgrade
@@ -332,8 +325,8 @@ def run_module():
                                                           chart_deploy_name=chart_deploy_name,
                                                           chart_source_name=chart_source_name,
                                                           chart_name=chart_name, chart_namespace=chart_namespace,
-                                                          chart_version=chart_version, values=values,
-                                                          values_file=values_file, chart_source_type=chart_source_type,
+                                                          chart_version=chart_version, values_file=values_file,
+                                                          chart_source_type=chart_source_type,
                                                           chart_location=chart_location, check_mode=module.check_mode,
                                                           force=force)
     # Change task status
