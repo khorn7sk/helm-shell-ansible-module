@@ -102,7 +102,7 @@ class ActionModule(ActionBase):
         # Save values to file
         if module_args['values'] != '':
             module_args['values_file'], content_tempfile = self.save_values_file(module_args['values'])
-            del module_args['values']
+        del module_args['values']
 
         # Execute helm_shell module
         module_return = self._execute_module(module_name='helm_shell',
