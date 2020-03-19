@@ -4,6 +4,7 @@ from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
 import os
+import sys
 import tempfile
 
 import yaml
@@ -20,9 +21,8 @@ def _create_content_tempfile(content):
         with open(content_tempfile, 'w') as yml:
             yaml.safe_dump(content, yml, allow_unicode=True)
     except Exception as err:
-        os.remove(content_tempfile)
-        result = {'failed': True, 'message': err}
-        return result
+        print("Cant save temp file. Reason: " + str(err))
+        sys.exit(1)
     return content_tempfile
 
 
