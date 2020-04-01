@@ -60,7 +60,7 @@ class ActionModule(ActionBase):
 
         # Read value file
         with open(value_file_path, "r") as _file:
-            value_file_source = _file.read()
+            value_file_source = yaml.safe_load(_file)
 
         return value_file_source
 
