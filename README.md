@@ -41,15 +41,14 @@ In the following examples we will show a task to deploy Grafana into the cluster
     namespace: monitoring
     create_namespace: True
     force: True
-    values: "grafana.ingress=enabled" # Separate values with commas
-    values_file: {{ role_path }}/files/grafana-values.yaml
+    values: "grafana: enabled" # YAML/JSON format
+    values_file: grafana-values.yaml # can be stored in files(playbook or role dir)
     version: 3.8.3
     source:
       type: repo
       name: stable # Name is mandatory when repo is remote
       location: https://kubernetes-charts.storage.googleapis.com
     force_install: "True"
-    tillerless: "False"
     state: "{{ 'present' if enable_prometheus == true else 'absent' }}"
 ```
 
@@ -60,11 +59,11 @@ In the following examples we will show a task to deploy Grafana into the cluster
     name: grafana
     chart_deploy_name: grafana_v5
     namespace: monitoring
-    values: "grafana.ingress=enabled" # Separate values with commas
-    values_file: {{ role_path }}/files/grafana-values.yaml
+    values: "grafana: enabled" # YAML/JSON format
+    values_file: grafana-values.yaml # can be stored in files(playbook or role dir)
     version: 3.8.3
     source:
-      type: directory
-      location: "{{ role_path }}/files/charts/grafana"
+      type: local
+      location: grafana-3.8.3.tgz # can be stored in files(playbook or role dir)
     state: "{{ 'present' if enable_grafana == true else 'absent' }}"
 ```

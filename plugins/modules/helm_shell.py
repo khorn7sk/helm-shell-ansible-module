@@ -1,6 +1,8 @@
 #!/usr/bin/python
 import json
 import os
+import shutil
+import tarfile
 
 from ansible.module_utils.basic import AnsibleModule
 
@@ -28,7 +30,7 @@ EXAMPLES = '''
     name: rook-ceph
     version: 0.8.0
     source:
-      type: directory
+      type: local
       location: "{{ role_path }}/files/platform/rook"
 '''
 
@@ -59,10 +61,10 @@ result = dict(
 )
 
 
-def remove_tmp_file(values_file):
+def remove_tmp_folder(values_file):
     if values_file != "":
         try:
-            os.remove(values_file)
+            shutil.rmtree(os.path.dirname(values_file), ignore_errors=True)
         except Exception as err:
             raise Exception('Cant remove tmp file on the remove host. Reason: ' + str(err))
 
@@ -75,7 +77,7 @@ def install_chart(**kwargs):
         chart_deploy_name (str): name of chart deployment
         chart_source_name (str): chart repo name
         chart_name (str): chart name
-        chart_source_type (str): Type of chart repo 'repo' or 'directory
+        chart_source_type (str): Type of chart repo 'repo' or 'local
         chart_location (str): URL or Path to chart
         chart_namespace (str): namespace for installing chart
         chart_create_namespace (bool): create namespace if not exist
@@ -98,7 +100,7 @@ def install_chart(**kwargs):
 
     # Define type of installation 'install' or 'update'
     if install_type == 'upgrade' and check_mode is False:
-        cmd_string += ' {0} {1}'.format(kwargs.get('install_type'), kwargs.get('chart_deploy_name'))
+        cmd_string += ' {0} {1}'.format('upgrade -i', kwargs.get('chart_deploy_name'))
     elif install_type == 'upgrade' and check_mode:
         cmd_string += ' {0} --dry-run {1}'.format(kwargs.get('install_type'), kwargs.get('chart_deploy_name'))
     elif install_type == 'install' and check_mode is False:
@@ -116,7 +118,7 @@ def install_chart(**kwargs):
         cmd_string += ' --replace'
 
     # Specify path fot local chart repo, and repo name for remote
-    if kwargs.get('chart_source_type') == 'directory':
+    if kwargs.get('chart_source_type') == 'local':
         cmd_string += ' {0} --namespace="{1}"'.format(kwargs.get('chart_location'), kwargs.get('chart_namespace'))
     else:
         cmd_string += ' {0}/{1} --namespace="{2}"'.format(kwargs.get('chart_source_name'), kwargs.get('chart_name'),
@@ -302,20 +304,32 @@ def run_module():
             result['changed'] = False
             result['failed'] = False
             result['message'] = 'Chart with name "{0}" already is not installed'.format(chart_deploy_name)
-            remove_tmp_file(values_file)
+            remove_tmp_folder(values_file)
             return module.exit_json(**result)
 
     # Add/update remote repository
-    if module.check_mode is False:
-        if chart_source_type == 'repo' and check_repo(chart_source_name, chart_location) is False:
-            if add_repo(chart_source_name, chart_location) is False:
-                remove_tmp_file(values_file)
-                return module.exit_json(msg='Cant add chart repo with name: %s' % chart_source_name, changed=False,
-                                        failed=True)
+    if chart_source_type == 'repo' and check_repo(chart_source_name, chart_location) is False:
+        if add_repo(chart_source_name, chart_location) is False:
+            remove_tmp_folder(values_file)
+            return module.exit_json(msg='Cant add chart repo with name: %s' % chart_source_name, changed=False,
+                                    failed=True)
         if update_repo() is False:
-            remove_tmp_file(values_file)
+            remove_tmp_folder(values_file)
             return module.exit_json(msg='Cant upgrade chart repo with name: %s' % chart_source_name, changed=False,
                                     failed=True)
+    # elif chart_source_type == 'local':
+    #     # Unpack helm chart
+    #     tar = tarfile.open(chart_location, 'r')
+    #
+    #     try:
+    #         tar.extractall(os.path.dirname(chart_location))
+    #     except Exception as e:
+    #         return module.exit_json(msg='Cant unpack helm chart: %s' % e, changed=False, failed=True)
+    #
+    #     # Save chart folder path
+    #     chart_location = os.path.dirname(chart_location)
+    # else:
+    #     return module.exit_json(msg='Unknown source type', changed=False, failed=True)
 
     # Chart doesn't exist first time, install
     if chart_deploy_name not in helm_charts_list:
@@ -355,10 +369,10 @@ def run_module():
         result['message'] = 'Installed chart {0}, version {1}'.format(chart_deploy_name, chart_version)
         result['original_message'] = msg
         result['cmd'] = cmd_str
-        remove_tmp_file(values_file)
+        remove_tmp_folder(values_file)
         return module.exit_json(**result)
     else:
-        remove_tmp_file(values_file)
+        remove_tmp_folder(values_file)
         return module.exit_json(msg='Chart {0} is not installed'.format(chart_deploy_name), original_message=msg,
                                 cmd=cmd_str, changed=False, failed=True)
 

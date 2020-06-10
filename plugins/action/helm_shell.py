@@ -28,31 +28,54 @@ def _create_content_tempfile(content):
 
 class ActionModule(ActionBase):
 
-    def save_values_file(self, value_file_content):
-        result = dict
-
-        # Create temp file on localhost
-        content_tempfile = _create_content_tempfile(value_file_content)
+    def create_remote_tmp_dir(self):
+        result = {'failed': False, 'message': 'None'}
 
         # Create tmp dir in remote host
         try:
-            tmp_src_dir = self._make_tmp_path()
+            tmp_dst_dir = self._make_tmp_path()
         except Exception as err:
             result['failed'] = True
             result['message'] = str(err)
             return result
 
-        tmp_src_file = tmp_src_dir + os.path.basename(content_tempfile) + '.yaml'
+        return tmp_dst_dir
+
+    def upload_helm_chart(self, chart_file_name, remote_tmp_dir):
+        result = {'failed': False, 'message': 'None'}
+
+        remote_chart_path = os.path.join(remote_tmp_dir, chart_file_name)
+
+        # Find the source value file
+        local_chart_path = self._find_needle('files', chart_file_name)
 
         # Copy file from localhost to remote host
         try:
-            self._connection.put_file(content_tempfile, tmp_src_file)
+            self._connection.put_file(local_chart_path, remote_chart_path)
         except Exception as err:
             result['failed'] = True
             result['message'] = err
             return result
 
-        return tmp_src_file, content_tempfile
+        return remote_chart_path
+
+    def upload_values_file(self, value_file_content, remote_tmp_dir):
+        result = {'failed': False, 'message': 'None'}
+
+        # Create temp file on localhost
+        content_temp_file = _create_content_tempfile(value_file_content)
+
+        remote_values_file = remote_tmp_dir + os.path.basename(content_temp_file) + '.yaml'
+
+        # Copy file from localhost to remote host
+        try:
+            self._connection.put_file(content_temp_file, remote_values_file)
+        except Exception as err:
+            result['failed'] = True
+            result['message'] = err
+            return result
+
+        return remote_values_file, content_temp_file
 
     def read_values_file(self, value_file):
         # Find the source value file
@@ -99,10 +122,19 @@ class ActionModule(ActionBase):
         # Get module args
         module_args = self.get_module_args()
 
+        # Create tmp dir on remote host
+        remote_tmp_dir = self.create_remote_tmp_dir()
+
         # Save values to file
         if module_args['values'] != '':
-            module_args['values_file'], content_tempfile = self.save_values_file(module_args['values'])
+            module_args['values_file'], content_tempfile = self.upload_values_file(module_args['values'],
+                                                                                   remote_tmp_dir)
         del module_args['values']
+
+        # Upload helm chart
+        if module_args['source']['type'] == 'local':
+            module_args['source']['location'] = self.upload_helm_chart(module_args['source']['location'],
+                                                                       remote_tmp_dir)
 
         # Execute helm_shell module
         module_return = self._execute_module(module_name='helm_shell',
