@@ -43,7 +43,8 @@ module_args = dict(
     namespace=dict(type='str', required=False, default='default'),
     state=dict(type='str', required=False, default='present'),
     values_file=dict(type='str', required=False, default=''),
-    force=dict(type='bool', required=False, default=False)
+    force=dict(type='bool', required=False, default=False),
+    create_namespace=dict(type='bool', required=False, default=True)
 )
 
 module = AnsibleModule(
@@ -77,6 +78,7 @@ def install_chart(**kwargs):
         chart_source_type (str): Type of chart repo 'repo' or 'directory
         chart_location (str): URL or Path to chart
         chart_namespace (str): namespace for installing chart
+        chart_create_namespace (bool): create namespace if not exist
         chart_version (str): chart version
         values_file (str): path to chart value file
         check_mode (bool): add --dry-run flag
@@ -106,6 +108,9 @@ def install_chart(**kwargs):
 
     if kwargs.get('force') and install_type == 'upgrade':
         cmd_string += ' --force'
+
+    if kwargs.get('chart_create_namespace'):
+        cmd_string += ' --create-namespace'
 
     if kwargs.get('replace'):
         cmd_string += ' --replace'
@@ -211,6 +216,18 @@ def check_repo(chart_source_name, chart_location):
     # Get installed repo list
     _cmd_str = 'helm repo list -o json'
     (_rc, repo_list_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
+
+    if 'no repositories to show' in _err:
+        # If no one repo added yes. Add stable
+        _cmd_add_stable_repo = 'helm repo add stable https://kubernetes-charts.storage.googleapis.com'
+        (_rc, repo_list_raw, _err) = module.run_command(_cmd_add_stable_repo, use_unsafe_shell=True)
+
+        if _rc:
+            return module.exit_json(original_message=_err, cmd=_cmd_add_stable_repo, changed=False, failed=True)
+
+        # And rerun repo list
+        (_rc, repo_list_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
+
     if _rc:
         return module.exit_json(original_message=_err, cmd=_cmd_str, changed=False, failed=True)
 
@@ -263,6 +280,7 @@ def add_repo(chart_source_name, chart_location):
 
 def run_module():
     chart_namespace = module.params['namespace']
+    chart_create_namespace = module.params['create_namespace']
     chart_state = module.params['state']
     chart_name = module.params['name']
     chart_deploy_name = module.params['chart_deploy_name']
@@ -308,7 +326,7 @@ def run_module():
                                                           chart_version=chart_version, values_file=values_file,
                                                           chart_source_type=chart_source_type,
                                                           chart_location=chart_location, check_mode=module.check_mode,
-                                                          force=force)
+                                                          force=force, chart_create_namespace=chart_create_namespace)
     # Chart exist, but in status 'DELETED', reinstall
     elif chart_deploy_name in helm_charts_list and helm_charts_list[chart_deploy_name] == 'DELETED':
         (ex_result, msg, status, cmd_str) = install_chart(install_type='install', replace=True,
@@ -318,7 +336,7 @@ def run_module():
                                                           chart_version=chart_version, values_file=values_file,
                                                           chart_source_type=chart_source_type,
                                                           chart_location=chart_location, check_mode=module.check_mode,
-                                                          force=force)
+                                                          force=force, chart_create_namespace=chart_create_namespace)
     # Chart exist, but in status 'DEPLOYED', upgrade
     else:
         (ex_result, msg, status, cmd_str) = install_chart(install_type='upgrade',
@@ -328,7 +346,7 @@ def run_module():
                                                           chart_version=chart_version, values_file=values_file,
                                                           chart_source_type=chart_source_type,
                                                           chart_location=chart_location, check_mode=module.check_mode,
-                                                          force=force)
+                                                          force=force, chart_create_namespace=chart_create_namespace)
     # Change task status
     if ex_result:
         chart_version = 'latest' if chart_version is False else chart_version

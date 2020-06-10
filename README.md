@@ -39,6 +39,7 @@ In the following examples we will show a task to deploy Grafana into the cluster
     name: grafana
     chart_deploy_name: grafana_v5
     namespace: monitoring
+    create_namespace: True
     force: True
     values: "grafana.ingress=enabled" # Separate values with commas
     values_file: {{ role_path }}/files/grafana-values.yaml
