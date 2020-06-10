@@ -1,3 +1,14 @@
+## Install:
+- `pip install -r requirements.txt`
+- copy plugins folder to:
+    - ~/.ansible/plugins/modules
+    - /usr/share/ansible/plugins/modules
+- or add to ansible.cfg path to plugins folder:
+```
+action_plugins = PATH_TO_PLUGINS_FOLDER/action/
+library = PATH_TO_PLUGINS_FOLDER/modules
+```
+
 ## Required flags:
 
 - **name** -> Name that will be assigned to the installed chart
