@@ -317,19 +317,6 @@ def run_module():
             remove_tmp_folder(values_file)
             return module.exit_json(msg='Cant upgrade chart repo with name: %s' % chart_source_name, changed=False,
                                     failed=True)
-    # elif chart_source_type == 'local':
-    #     # Unpack helm chart
-    #     tar = tarfile.open(chart_location, 'r')
-    #
-    #     try:
-    #         tar.extractall(os.path.dirname(chart_location))
-    #     except Exception as e:
-    #         return module.exit_json(msg='Cant unpack helm chart: %s' % e, changed=False, failed=True)
-    #
-    #     # Save chart folder path
-    #     chart_location = os.path.dirname(chart_location)
-    # else:
-    #     return module.exit_json(msg='Unknown source type', changed=False, failed=True)
 
     # Chart doesn't exist first time, install
     if chart_deploy_name not in helm_charts_list:
