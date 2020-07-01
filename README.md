@@ -48,6 +48,8 @@ In the following examples we will show a task to deploy Grafana into the cluster
       type: repo
       name: stable # Name is mandatory when repo is remote
       location: https://kubernetes-charts.storage.googleapis.com
+      username: admin # username for helm registry
+      password: admin # password for helm registry
     force_install: "True"
     state: "{{ 'present' if enable_prometheus == true else 'absent' }}"
 ```

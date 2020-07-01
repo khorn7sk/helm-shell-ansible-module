@@ -1,48 +1,61 @@
 #!/usr/bin/python
 
 from __future__ import (absolute_import, division, print_function)
+
 __metaclass__ = type
 
+import json
 import os
-import sys
 import tempfile
 
 import yaml
 from ansible import constants as _const
+from ansible.module_utils.common.json import AnsibleJSONEncoder
 from ansible.plugins.action import ActionBase
 from jsonmerge import merge
 
 
-def _create_content_tempfile(content):
-    # Create a tempfile containing defined content
-    tmp_file_dir, content_tempfile = tempfile.mkstemp(dir=_const.DEFAULT_LOCAL_TMP)
-
-    try:
-        with open(content_tempfile, 'w') as yml:
-            yaml.safe_dump(content, yml, allow_unicode=True)
-    except Exception as err:
-        print("Cant save temp file. Reason: " + str(err))
-        sys.exit(1)
-    return content_tempfile
-
-
 class ActionModule(ActionBase):
 
+    @staticmethod
+    def create_content_tempfile(content):
+        result = {'failed': False, 'message': 'None', 'reason': 'None', 'content': 'None'}
+
+        # Convert AnsibleUnsafeText to normal JSON
+        content = json.dumps(content, sort_keys=True, cls=AnsibleJSONEncoder)
+        content = json.loads(content)
+
+        # Create a tempfile containing defined content
+        tmp_file_dir, content_tempfile = tempfile.mkstemp(dir=_const.DEFAULT_LOCAL_TMP)
+
+        try:
+            with open(content_tempfile, 'w') as yml:
+                yaml.safe_dump(content, yml, default_flow_style=False)
+        except Exception as err:
+            result['failed'] = True
+            result['content'] = content
+            result['message'] = 'Can\'t save temp values file on localhost'
+            result['reason'] = str(err)
+            return result, ''
+
+        return result, content_tempfile
+
     def create_remote_tmp_dir(self):
-        result = {'failed': False, 'message': 'None'}
+        result = {'failed': False, 'message': 'None', 'reason': 'None'}
 
         # Create tmp dir in remote host
         try:
             tmp_dst_dir = self._make_tmp_path()
         except Exception as err:
             result['failed'] = True
-            result['message'] = str(err)
-            return result
+            result['message'] = 'Can\'t create tmp dir on remote host'
+            result['reason'] = str(err)
+            return result, ''
 
-        return tmp_dst_dir
+        return result, tmp_dst_dir
 
     def upload_helm_chart(self, chart_file_name, remote_tmp_dir):
-        result = {'failed': False, 'message': 'None'}
+        result = {'failed': False, 'message': 'None', 'reason': 'None'}
 
         remote_chart_path = os.path.join(remote_tmp_dir, chart_file_name)
 
@@ -54,16 +67,20 @@ class ActionModule(ActionBase):
             self._connection.put_file(local_chart_path, remote_chart_path)
         except Exception as err:
             result['failed'] = True
-            result['message'] = err
-            return result
+            result['message'] = 'Can\'t upload helm chart from localhost to remote server'
+            result['reason'] = err
+            return result, ''
 
-        return remote_chart_path
+        return result, remote_chart_path
 
     def upload_values_file(self, value_file_content, remote_tmp_dir):
-        result = {'failed': False, 'message': 'None'}
+        result = {'failed': False, 'message': 'None', 'reason': 'None'}
 
         # Create temp file on localhost
-        content_temp_file = _create_content_tempfile(value_file_content)
+        result, content_temp_file = self.create_content_tempfile(value_file_content)
+
+        if result['failed']:
+            return result, '', ''
 
         remote_values_file = remote_tmp_dir + os.path.basename(content_temp_file) + '.yaml'
 
@@ -72,17 +89,18 @@ class ActionModule(ActionBase):
             self._connection.put_file(content_temp_file, remote_values_file)
         except Exception as err:
             result['failed'] = True
-            result['message'] = err
-            return result
+            result['message'] = 'Can\'t upload values file from localhost to remote server'
+            result['reason'] = err
+            return result, '', ''
 
-        return remote_values_file, content_temp_file
+        return result, remote_values_file, content_temp_file
 
     def read_values_file(self, value_file):
         # Find the source value file
         value_file_path = self._find_needle('files', value_file)
 
         # Read value file
-        with open(value_file_path, "r") as _file:
+        with open(value_file_path, 'r') as _file:
             value_file_source = yaml.safe_load(_file)
 
         return value_file_source
@@ -123,18 +141,25 @@ class ActionModule(ActionBase):
         module_args = self.get_module_args()
 
         # Create tmp dir on remote host
-        remote_tmp_dir = self.create_remote_tmp_dir()
+        result, remote_tmp_dir = self.create_remote_tmp_dir()
+        if result['failed']:
+            return result
 
         # Save values to file
         if module_args['values'] != '':
-            module_args['values_file'], content_tempfile = self.upload_values_file(module_args['values'],
-                                                                                   remote_tmp_dir)
+            result, module_args['values_file'], content_tempfile = self.upload_values_file(module_args['values'],
+                                                                                           remote_tmp_dir)
+            if result['failed']:
+                return result
+
         del module_args['values']
 
         # Upload helm chart
         if module_args['source']['type'] == 'local':
-            module_args['source']['location'] = self.upload_helm_chart(module_args['source']['location'],
-                                                                       remote_tmp_dir)
+            result, module_args['source']['location'] = self.upload_helm_chart(module_args['source']['location'],
+                                                                               remote_tmp_dir)
+            if result['failed']:
+                return result
 
         # Execute helm_shell module
         module_return = self._execute_module(module_name='helm_shell',
