@@ -186,16 +186,17 @@ def get_chart_lists():
     return helm_chart_list
 
 
-def remove_chart(chart_deploy_name, check_mode):
+def remove_chart(chart_deploy_name, check_mode, chart_namespace):
     """
     Args:
         chart_deploy_name (str): chart name
         check_mode (bool): run with --dry-run flag
+        chart_namespace (str): chart namespace
     """
     if check_mode is False:
-        _cmd_str = 'helm delete "{0}"'.format(chart_deploy_name)
+        _cmd_str = 'helm delete "{0}" -n "{1}"'.format(chart_deploy_name, chart_namespace)
     else:
-        _cmd_str = 'helm delete "{0}" --dry-run'.format(chart_deploy_name)
+        _cmd_str = 'helm delete "{0}" -n "{1}" --dry-run'.format(chart_deploy_name, chart_namespace)
 
     (_rc, remove_chart_output_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
     if _rc:
@@ -314,7 +315,7 @@ def run_module():
     # Remove chart if state 'absent'
     if chart_state == 'absent':
         if chart_deploy_name in helm_charts_list:
-            remove_chart(chart_deploy_name, module.check_mode)
+            remove_chart(chart_deploy_name, module.check_mode, chart_namespace)
         elif chart_deploy_name not in helm_charts_list:
             result['changed'] = False
             result['failed'] = False
