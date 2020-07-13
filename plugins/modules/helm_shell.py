@@ -329,10 +329,11 @@ def run_module():
             remove_tmp_folder(values_file)
             return module.exit_json(msg='Cant add chart repo with name: %s' % chart_source_name, changed=False,
                                     failed=True)
-        if update_repo() is False:
-            remove_tmp_folder(values_file)
-            return module.exit_json(msg='Cant upgrade chart repo with name: %s' % chart_source_name, changed=False,
-                                    failed=True)
+
+    if update_repo() is False:
+        remove_tmp_folder(values_file)
+        return module.exit_json(msg='Cant upgrade chart repo with name: %s' % chart_source_name, changed=False,
+                                failed=True)
 
     # Chart doesn't exist first time, install
     if chart_deploy_name not in helm_charts_list:
