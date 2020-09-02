@@ -132,33 +132,40 @@ def install_chart(**kwargs):
     if kwargs.get('values_file'):
         cmd_string += ' -f {0}'.format(kwargs.get('values_file'))
 
-    if check_mode is False:
-        cmd_string += ' --output json'
+    # Set default output to json
+    cmd_string += ' --output json'
 
     (_rc, chart_output_raw, _err) = module.run_command(cmd_string, use_unsafe_shell=True)
     if _rc:
         return module.exit_json(original_message=_err, cmd=cmd_string, changed=False, failed=True)
 
     # Load output to json format and pars installation code
-    if check_mode is False:
-        chart_output = json.loads(chart_output_raw)
-        install_status = chart_output['info']['status']
-    else:
-        chart_output = chart_output_raw
-        install_status = 'deployed'
+    chart_output = json.loads(chart_output_raw)
+    install_status = chart_output['info']['status']
 
-    chart_message = {
-        "name": chart_output['name'],
-        "namespace": chart_output['namespace'],
-        "info": chart_output['info']['notes'],
-        "manifest": chart_output['manifest'],
-        "status": chart_output['info']['status'],
-        "version": chart_output['version']
-    }
+    chart_message = {}
+
+    if 'name' in chart_output:
+        chart_message.update({'name': chart_output['name']})
+
+    if 'namespace' in chart_output:
+        chart_message.update({'namespace': chart_output['namespace']})
+
+    if 'manifest' in chart_output:
+        chart_message.update({'manifest': chart_output['manifest']})
+
+    if 'version' in chart_output:
+        chart_message.update({'version': chart_output['version']})
+
+    if 'info' in chart_output:
+        if 'status' in chart_output['info']:
+            chart_message.update({'status': chart_output['info']['status']})
+        if 'notes' in chart_output['info']:
+            chart_message.update({'info': chart_output['info']['notes']})
 
     chart_diff = {"prepared": chart_output['manifest'] + "\n" + chart_output['info']['notes']}
 
-    if install_status == 'deployed':
+    if install_status == 'deployed' or install_status == 'pending-upgrade':
         return True, chart_message, chart_diff, install_status, cmd_string
     else:
         return False, chart_message, chart_diff, install_status, cmd_string
