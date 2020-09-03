@@ -102,7 +102,7 @@ def install_chart(**kwargs):
     if install_type == 'upgrade' and check_mode is False:
         cmd_string += ' {0} {1}'.format('upgrade -i', kwargs.get('chart_deploy_name'))
     elif install_type == 'upgrade' and check_mode:
-        cmd_string += ' {0} --dry-run {1}'.format(kwargs.get('install_type'), kwargs.get('chart_deploy_name'))
+        cmd_string += ' {0} -i --dry-run {1}'.format(kwargs.get('install_type'), kwargs.get('chart_deploy_name'))
     elif install_type == 'install' and check_mode is False:
         cmd_string += ' {0} {1}'.format(kwargs.get('install_type'), kwargs.get('chart_deploy_name'))
     elif install_type == 'install' and check_mode:
@@ -165,7 +165,7 @@ def install_chart(**kwargs):
 
     chart_diff = {"prepared": chart_output['manifest'] + "\n" + chart_output['info']['notes']}
 
-    if install_status == 'deployed' or install_status == 'pending-upgrade':
+    if install_status in ['deployed', 'pending-upgrade', 'pending-install']:
         return True, chart_message, chart_diff, install_status, cmd_string
     else:
         return False, chart_message, chart_diff, install_status, cmd_string
