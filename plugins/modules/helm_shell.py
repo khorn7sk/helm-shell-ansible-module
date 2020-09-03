@@ -171,12 +171,14 @@ def install_chart(**kwargs):
         return False, chart_message, chart_diff, install_status, cmd_string
 
 
-def get_chart_lists():
+def get_chart_lists(chart_namespace):
     """
+    Args:
+        chart_namespace(str): chart namespace
     Returns:
         dist of all charts name and status
     """
-    _cmd_str = 'helm list -A --output json'
+    _cmd_str = 'helm list -n {0} --output json'.format(chart_namespace)
     (_rc, helm_chart_list_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
     if _rc:
         return module.exit_json(original_message=_err, cmd=_cmd_str, changed=False, failed=True)
@@ -317,7 +319,7 @@ def run_module():
     chart_source_name = module.params['source']['name'] if chart_source_type == 'repo' else ''
 
     # Get chart lists
-    helm_charts_list = get_chart_lists()
+    helm_charts_list = get_chart_lists(chart_namespace)
 
     # Remove chart if state 'absent'
     if chart_state == 'absent':
