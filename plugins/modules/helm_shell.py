@@ -212,7 +212,7 @@ def remove_chart(chart_deploy_name, check_mode, chart_namespace):
         return module.exit_json(original_message=_err, cmd=_cmd_str, changed=False, failed=True)
 
     # Check output and fail task when not find 'deleted message in output'
-    if 'deleted' in remove_chart_output_raw:
+    if 'uninstalled' in remove_chart_output_raw:
         result['changed'] = True
         result['failed'] = False
         result['message'] = 'Deleted chart {0}'.format(chart_deploy_name)
