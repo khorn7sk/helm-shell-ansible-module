@@ -1,0 +1,21 @@
+---
+
+- name: Install "{{ helm_chart_name }}"
+  helm_shell:
+    name: "{{ helm_chart_name }}"
+    chart_deploy_name: "{{ helm_chart_deploy_name }}"
+    namespace: "{{ helm_chart_namespace }}"
+    create_namespace: "{{ helm_chart_create_namespace }}"
+    values_file: "{{ helm_chart_values_file }}"
+    values: "{{ helm_chart_values }}"
+    version: "{{ helm_chart_version }}"
+    wait: "{{ helm_chart_wait }}"
+    timeout: "{{ helm_chart_timeout }}"
+    source:
+      type: "{{ helm_chart_source_type }}"
+      name: "{{ helm_chart_source_name }}"
+      location: "{{ helm_chart_source_location }}"
+      username: "{{ helm_chart_source_username }}"
+      password: "{{ helm_chart_source_password }}"
+    state: "{{ helm_chart_state }}"
+    force: "{{ helm_chart_force_install }}"

@@ -44,6 +44,8 @@ In the following examples we will show a task to deploy Grafana into the cluster
     values: "grafana: enabled" # YAML/JSON format
     values_file: grafana-values.yaml # can be stored in files(playbook or role dir)
     version: 3.8.3
+    wait: True # Add --wait flag
+    timeout: 800 #Seconds
     source:
       type: repo
       name: stable # Name is mandatory when repo is remote

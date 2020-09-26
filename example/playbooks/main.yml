@@ -1,0 +1,24 @@
+---
+
+- name: Install kubernetes dashboard
+  hosts: master-server-1
+  gather_facts: no
+  become: true
+
+  pre_tasks:
+    - name: Include vars
+      include_vars: values.yml
+      tags:
+        - always
+
+  roles:
+    - role: helm_chart
+      helm_chart_name: "kubernetes-dashboard"
+      helm_chart_deploy_name: "kubernetes-dashboard"
+      helm_chart_namespace: "kube-dashboard"
+      helm_chart_version: "2.0.1"
+      helm_chart_source_name: "kubernetes-dashboard"
+      helm_chart_source_location: "https://kubernetes.github.io/dashboard/"
+      helm_chart_values: "{{ dashboard_values }}"
+      tags:
+        - dashboard

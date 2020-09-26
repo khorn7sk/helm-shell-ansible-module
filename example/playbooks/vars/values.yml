@@ -1,0 +1,31 @@
+---
+
+dashboard_values:
+  extraArgs:
+    - --enable-insecure-login
+  protocolHttp: true
+  resources:
+    requests:
+      cpu: 1
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 512Mi
+  ingress:
+    enabled: false
+  metricsScraper:
+    enabled: true
+    image:
+      repository: kubernetesui/metrics-scraper
+      tag: v1.0.4
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 100m
+        memory: 512Mi
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    maxUnavailable: 0

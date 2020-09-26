@@ -1,0 +1,18 @@
+---
+
+helm_chart_name: "memcached"
+helm_chart_values_file: ""
+helm_chart_values: ""
+helm_chart_deploy_name: "cache"
+helm_chart_namespace: "default"
+helm_chart_version: "3.2.2"
+helm_chart_source_type: "repo"
+helm_chart_source_name: "stable"
+helm_chart_source_location: "https://kubernetes-charts.storage.googleapis.com"
+helm_chart_state: present
+helm_chart_force_install: False
+helm_chart_create_namespace: True
+helm_chart_source_username: ""
+helm_chart_source_password: ""
+helm_chart_wait: True
+helm_chart_timeout: 300

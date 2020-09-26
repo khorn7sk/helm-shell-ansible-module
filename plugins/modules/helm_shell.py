@@ -45,7 +45,9 @@ module_args = dict(
     state=dict(type='str', required=False, default='present'),
     values_file=dict(type='str', required=False, default=''),
     force=dict(type='bool', required=False, default=False),
-    create_namespace=dict(type='bool', required=False, default=True)
+    create_namespace=dict(type='bool', required=False, default=True),
+    wait=dict(type='bool', required=False, default=False),
+    timeout=dict(type='int', required=False, default=300)
 )
 
 module = AnsibleModule(
@@ -84,6 +86,8 @@ def install_chart(**kwargs):
         values_file (str): path to chart value file
         check_mode (bool): add --dry-run flag
         force (bool): add --force flag
+        chart_wait (bool): add --wait flag
+        chart_timeout (int): add --timeout flag
     Returns:
         bool
         dict - raw output from helm install command
@@ -131,6 +135,9 @@ def install_chart(**kwargs):
     # Specify chart values file
     if kwargs.get('values_file'):
         cmd_string += ' -f {0}'.format(kwargs.get('values_file'))
+
+    if kwargs.get('chart_wait'):
+        cmd_string += ' --wait --timeout {0}s'.format(kwargs.get('chart_timeout'))
 
     # Set default output to json
     cmd_string += ' --output json'
@@ -317,6 +324,8 @@ def run_module():
     force = module.params['force']
     chart_version = module.params['version']
     chart_source_name = module.params['source']['name'] if chart_source_type == 'repo' else ''
+    chart_wait = module.params['wait']
+    chart_timeout = module.params['timeout']
 
     # Get chart lists
     helm_charts_list = get_chart_lists(chart_namespace)
@@ -355,7 +364,8 @@ def run_module():
                                                                 chart_location=chart_location,
                                                                 check_mode=module.check_mode,
                                                                 force=force,
-                                                                chart_create_namespace=chart_create_namespace)
+                                                                chart_create_namespace=chart_create_namespace,
+                                                                chart_wait=chart_wait, chart_timeout=chart_timeout)
     # Chart exist, but in status 'DELETED', reinstall
     elif chart_deploy_name in helm_charts_list and helm_charts_list[chart_deploy_name] == 'DELETED':
         (ex_result, msg, diff, status, cmd_str) = install_chart(install_type='install', replace=True,
@@ -367,7 +377,8 @@ def run_module():
                                                                 chart_location=chart_location,
                                                                 check_mode=module.check_mode,
                                                                 force=force,
-                                                                chart_create_namespace=chart_create_namespace)
+                                                                chart_create_namespace=chart_create_namespace,
+                                                                chart_wait=chart_wait, chart_timeout=chart_timeout)
     # Chart exist, but in status 'DEPLOYED', upgrade
     else:
         (ex_result, msg, diff, status, cmd_str) = install_chart(install_type='upgrade',
@@ -379,7 +390,8 @@ def run_module():
                                                                 chart_location=chart_location,
                                                                 check_mode=module.check_mode,
                                                                 force=force,
-                                                                chart_create_namespace=chart_create_namespace)
+                                                                chart_create_namespace=chart_create_namespace,
+                                                                chart_wait=chart_wait, chart_timeout=chart_timeout)
     # Change task status
     if ex_result:
         chart_version = 'latest' if chart_version is False else chart_version
