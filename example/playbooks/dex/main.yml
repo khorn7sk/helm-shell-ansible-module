@@ -1,0 +1,24 @@
+---
+
+- name: Install dex
+  hosts: master-server-1
+  gather_facts: no
+  become: true
+
+  pre_tasks:
+    - name: Include vars
+      include_vars: values.yml
+      tags:
+        - always
+
+  roles:
+    - role: helm_chart
+      helm_chart_name: dex
+      helm_chart_deploy_name: dex
+      helm_chart_source_type: "local"
+      helm_chart_source_location: "dex-1.2.0.tgz"
+      helm_chart_namespace: "kube-auth"
+      helm_chart_version: "1.2.0"
+      helm_chart_values: "{{ dex_values }}"
+      tags:
+        - dex
