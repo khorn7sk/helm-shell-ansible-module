@@ -185,7 +185,7 @@ def get_chart_lists(chart_namespace):
     Returns:
         dist of all charts name and status
     """
-    _cmd_str = 'helm list -n {0} --output json'.format(chart_namespace)
+    _cmd_str = 'helm list -a -n {0} --output json'.format(chart_namespace)
     (_rc, helm_chart_list_raw, _err) = module.run_command(_cmd_str, use_unsafe_shell=True)
     if _rc:
         return module.exit_json(original_message=_err, cmd=_cmd_str, changed=False, failed=True)
